@@ -5,12 +5,25 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
+const (
+	MaxCommitLoad = 200
+	MaxDiffLines  = 800
+)
+
+var (
+	commitCache = map[string]string{}
+	cacheMutex  sync.RWMutex
+)
+
 func executeCommand(name string, args ...string) string {
+
 	cmd := exec.Command(name, args...)
 
 	output, err := cmd.Output()
@@ -21,53 +34,122 @@ func executeCommand(name string, args ...string) string {
 	return string(output)
 }
 
-func getCommitList() []string {
+// DEFAULT RECENT COMMITS
+func getRecentCommits() []string {
+
 	output := executeCommand(
 		"git",
 		"log",
-		"--oneline",
+		fmt.Sprintf("-%d", MaxCommitLoad),
+		"--pretty=format:%H|%s",
 	)
 
+	return splitLines(output)
+}
+
+// SEARCH ENTIRE HISTORY
+func searchCommits(keyword string) []string {
+
+	keyword = strings.TrimSpace(keyword)
+
+	// EMPTY -> RECENT COMMITS
+	if keyword == "" {
+		return getRecentCommits()
+	}
+
+	output := executeCommand(
+		"git",
+		"log",
+		"--all",
+		"--pretty=format:%H|%s",
+		"--grep="+keyword,
+		fmt.Sprintf("-%d", MaxCommitLoad),
+	)
+
+	return splitLines(output)
+}
+
+func splitLines(content string) []string {
+
+	if strings.TrimSpace(content) == "" {
+		return []string{}
+	}
+
 	return strings.Split(
-		strings.TrimSpace(output),
+		strings.TrimSpace(content),
 		"\n",
 	)
 }
 
-func getCommitFiles(hash string) []string {
+func getCommitDetail(hash string) string {
+
+	// CACHE HIT
+	cacheMutex.RLock()
+	cached, ok := commitCache[hash]
+	cacheMutex.RUnlock()
+
+	if ok {
+		return cached
+	}
+
 	output := executeCommand(
 		"git",
 		"show",
-		"--name-only",
-		"--format=",
+		"--minimal",
+		"--stat",
+		"--patch",
+		"--unified=10",
 		hash,
 	)
 
-	return strings.Split(
-		strings.TrimSpace(output),
-		"\n",
-	)
+	lines := strings.Split(output, "\n")
+
+	if len(lines) > MaxDiffLines {
+
+		lines = lines[:MaxDiffLines]
+
+		lines = append(
+			lines,
+			"",
+			"... output truncated ...",
+		)
+	}
+
+	result := strings.Join(lines, "\n")
+
+	// SAVE CACHE
+	cacheMutex.Lock()
+	commitCache[hash] = result
+	cacheMutex.Unlock()
+
+	return result
 }
 
-func getFileDiff(hash string, file string) string {
-	return executeCommand(
-		"git",
-		"show",
-		hash,
-		"--",
-		file,
-	)
-}
+func colorizeGitOutput(content string) string {
 
-func colorizeDiff(diff string) string {
-
-	lines := strings.Split(diff, "\n")
+	lines := strings.Split(content, "\n")
 
 	var result []string
 
 	for _, line := range lines {
 
 		switch {
+
+		case strings.HasPrefix(line, "commit "):
+			result = append(result, "[yellow]"+line)
+
+		case strings.HasPrefix(line, "Author:"):
+			result = append(result, "[aqua]"+line)
+
+		case strings.HasPrefix(line, "Date:"):
+			result = append(result, "[purple]"+line)
+
+		case strings.HasPrefix(line, "diff --git"):
+			result = append(result, "[blue]"+line)
+
+		case strings.HasPrefix(line, "+++"),
+			strings.HasPrefix(line, "---"):
+			result = append(result, "[teal]"+line)
 
 		case strings.HasPrefix(line, "+"):
 			result = append(result, "[green]"+line)
@@ -78,11 +160,11 @@ func colorizeDiff(diff string) string {
 		case strings.HasPrefix(line, "@@"):
 			result = append(result, "[yellow]"+line)
 
-		case strings.HasPrefix(line, "diff --git"):
-			result = append(result, "[blue]"+line)
+		case strings.Contains(line, "|"):
+			result = append(result, "[white]"+line)
 
 		default:
-			result = append(result, "[white]"+line)
+			result = append(result, "[gray]"+line)
 		}
 	}
 
@@ -93,190 +175,168 @@ func main() {
 
 	app := tview.NewApplication()
 
-	allCommits := getCommitList()
-
 	// SEARCH INPUT
 	searchInput := tview.NewInputField().
-		SetLabel("Search: ")
+		SetLabel(" Search Commit: ")
 
 	searchInput.SetBorder(true)
 
-	// LEFT TREE
-	root := tview.NewTreeNode("[yellow]Commits")
-	root.SetExpanded(true)
+	// COMMIT LIST
+	commitList := tview.NewList()
 
-	tree := tview.NewTreeView().
-		SetRoot(root).
-		SetCurrentNode(root)
+	commitList.SetBorder(true)
+	commitList.SetTitle(" GitForest ")
 
-	tree.SetBorder(true)
-	tree.SetTitle("Git History")
-
-	// RIGHT DIFF PANEL
+	// DIFF VIEW
 	diffView := tview.NewTextView()
 
 	diffView.SetBorder(true)
-	diffView.SetTitle("Diff Preview")
+	diffView.SetTitle(" Commit Preview ")
 	diffView.SetScrollable(true)
 	diffView.SetDynamicColors(true)
 
-	// BUILD TREE FUNCTION
-	buildTree := func(keyword string) {
+	// FOOTER
+	footer := tview.NewTextView()
 
-		root.ClearChildren()
+	footer.SetDynamicColors(true)
+	footer.SetTextAlign(tview.AlignRight)
 
-		for i := 0; i < len(allCommits); i++ {
+	footer.SetText(
+		"[green]⚡ [white]gitforest [gray]by [yellow]aji mustofa",
+	)
 
-			commit := allCommits[i]
+	// BUILD LIST
+	buildCommitList := func(commits []string) {
+
+		commitList.Clear()
+
+		if len(commits) == 0 {
+
+			commitList.AddItem(
+				"[red]No commits found",
+				"",
+				0,
+				nil,
+			)
+
+			return
+		}
+
+		for i := 0; i < len(commits); i++ {
+
+			commit := commits[i]
 
 			if strings.TrimSpace(commit) == "" {
 				continue
 			}
 
-			// FILTER
-			if keyword != "" &&
-				!strings.Contains(
-					strings.ToLower(commit),
-					strings.ToLower(keyword),
-				) {
+			parts := strings.SplitN(commit, "|", 2)
+
+			if len(parts) < 2 {
 				continue
 			}
 
-			parts := strings.Split(commit, " ")
-
 			hash := parts[0]
+			message := parts[1]
 
 			idx := strconv.Itoa(i + 1)
 
-			coloredCommit := fmt.Sprintf(
-				"[yellow](%s)[white] %s",
+			title := fmt.Sprintf(
+				"(%s) %s [gray][%s]",
 				idx,
-				commit,
+				message,
+				hash[:7],
 			)
 
-			commitNode := tview.NewTreeNode(coloredCommit)
+			currentHash := hash
 
-			commitNode.SetExpanded(false)
+			commitList.AddItem(
+				title,
+				"",
+				0,
+				func() {
 
-			files := getCommitFiles(hash)
+					diffView.SetText(
+						"[yellow]Loading commit detail...",
+					)
 
-			for _, file := range files {
+					go func(hash string) {
 
-				if strings.TrimSpace(file) == "" {
-					continue
-				}
+						content := getCommitDetail(hash)
 
-				pathParts := strings.Split(file, "/")
+						colored := colorizeGitOutput(content)
 
-				currentNode := commitNode
+						app.QueueUpdateDraw(func() {
 
-				fullPath := ""
-
-				for _, part := range pathParts {
-
-					if fullPath == "" {
-						fullPath = part
-					} else {
-						fullPath += "/" + part
-					}
-
-					var foundNode *tview.TreeNode
-
-					for _, child := range currentNode.GetChildren() {
-
-						cleanText := strings.ReplaceAll(
-							child.GetText(),
-							"[blue]",
-							"",
-						)
-
-						cleanText = strings.ReplaceAll(
-							cleanText,
-							"[cyan]",
-							"",
-						)
-
-						if cleanText == part {
-							foundNode = child
-							break
-						}
-					}
-
-					if foundNode == nil {
-
-						color := "[cyan]"
-
-						if !strings.Contains(part, ".") {
-							color = "[blue]"
-						}
-
-						foundNode = tview.NewTreeNode(
-							color + part,
-						)
-
-						foundNode.SetExpanded(true)
-
-						foundNode.SetReference(map[string]string{
-							"hash": hash,
-							"file": fullPath,
+							diffView.SetText(colored)
 						})
 
-						currentNode.AddChild(foundNode)
-					}
-
-					currentNode = foundNode
-				}
-			}
-
-			root.AddChild(commitNode)
+					}(currentHash)
+				},
+			)
 		}
 	}
 
-	buildTree("")
+	// INITIAL LOAD
+	initialCommits := getRecentCommits()
 
-	// SEARCH LIVE
+	buildCommitList(initialCommits)
+
+	// SEARCH DEBOUNCE
+	var searchTimer *time.Timer
+
 	searchInput.SetChangedFunc(func(text string) {
-		buildTree(text)
-	})
 
-	// SELECT FILE
-	tree.SetSelectedFunc(func(node *tview.TreeNode) {
-
-		ref := node.GetReference()
-
-		if ref == nil {
-			node.SetExpanded(!node.IsExpanded())
-			return
+		if searchTimer != nil {
+			searchTimer.Stop()
 		}
 
-		data, ok := ref.(map[string]string)
+		searchTimer = time.AfterFunc(
+			300*time.Millisecond,
+			func() {
 
-		if !ok {
-			return
-		}
+				app.QueueUpdateDraw(func() {
 
-		hash := data["hash"]
-		file := data["file"]
+					commitList.Clear()
 
-		diff := getFileDiff(hash, file)
+					commitList.AddItem(
+						"[yellow]Searching commits...",
+						"",
+						0,
+						nil,
+					)
+				})
 
-		diffView.SetText(
-			colorizeDiff(diff),
+				go func(keyword string) {
+
+					results := searchCommits(keyword)
+
+					app.QueueUpdateDraw(func() {
+
+						buildCommitList(results)
+					})
+
+				}(text)
+			},
 		)
-
-		node.SetExpanded(!node.IsExpanded())
 	})
 
-	// TOP + CONTENT
+	// LEFT PANEL
 	leftPanel := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(searchInput, 3, 0, true).
-		AddItem(tree, 0, 1, false)
+		AddItem(commitList, 0, 1, false)
+
+	// RIGHT PANEL
+	rightPanel := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(diffView, 0, 1, false).
+		AddItem(footer, 1, 0, false)
 
 	// MAIN LAYOUT
 	layout := tview.NewFlex().
 		AddItem(leftPanel, 0, 1, true).
-		AddItem(diffView, 0, 2, false)
+		AddItem(rightPanel, 0, 2, false)
 
 	// TAB SWITCHING
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -286,10 +346,15 @@ func main() {
 		case tcell.KeyTAB:
 
 			if app.GetFocus() == searchInput {
-				app.SetFocus(tree)
-			} else if app.GetFocus() == tree {
+
+				app.SetFocus(commitList)
+
+			} else if app.GetFocus() == commitList {
+
 				app.SetFocus(diffView)
+
 			} else {
+
 				app.SetFocus(searchInput)
 			}
 
@@ -298,6 +363,15 @@ func main() {
 
 		return event
 	})
+
+	// INITIAL TEXT
+	diffView.SetText(
+		"[green]Welcome to GitForest\n\n" +
+			"[white]• Search entire git history\n" +
+			"[white]• Press Enter to preview commit\n" +
+			"[white]• Use TAB to switch focus\n\n" +
+			"[gray]Optimized for large repositories.",
+	)
 
 	if err := app.SetRoot(layout, true).Run(); err != nil {
 		panic(err)
