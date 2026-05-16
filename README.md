@@ -38,9 +38,9 @@ go install github.com/ajimustofa/gitforest
 ```bash
 git clone https://github.com/ajimustofa/gitforest.git
 
-cd gitpeek
+cd gitforest
 
-go build -o gitpeek
+go build -o gitforest
 ```
 
 ---
