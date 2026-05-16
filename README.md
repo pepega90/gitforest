@@ -30,13 +30,13 @@ Built with Go + tview.
 ### Go Install
 
 ```bash
-go install github.com/ajimustofa/gitpeek@latest
+go install github.com/ajimustofa/gitforest
 ```
 
 ### Clone & Build
 
 ```bash
-git clone https://github.com/ajimustofa/gitpeek.git
+git clone https://github.com/ajimustofa/gitforest.git
 
 cd gitpeek
 
