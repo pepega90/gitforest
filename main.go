@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	MaxCommitLoad = 200
-	MaxDiffLines  = 800
+	MaxCommitLoad = 15
+	MaxDiffLines  = 50
 )
 
 var (
