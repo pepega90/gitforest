@@ -8,21 +8,7 @@ Built with Go + tview.
 
 ## Preview
 
-```bash
-Commits
-├── feat: add retry worker
-│   ├── internal
-│   │   └── retry.go
-│   └── main.go
-│
-├── fix: nil pointer
-│   └── payment.go
-```
-
-```diff
-- panic(err)
-+ log.Error(err)
-```
+<img width="1553" height="916" alt="image" src="https://github.com/user-attachments/assets/9b3a8f7f-ea10-4734-846d-bdf214fb9fc3" />
 
 ---
 
@@ -86,9 +72,7 @@ gitpeek
 - tview
 - tcell
 
-## Screenshots
-
-<img width="1553" height="916" alt="image" src="https://github.com/user-attachments/assets/9b3a8f7f-ea10-4734-846d-bdf214fb9fc3" />
+---
 
 ## Contributing
 
