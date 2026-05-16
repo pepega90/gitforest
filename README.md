@@ -50,7 +50,7 @@ go build -o gitforest
 Run inside any Git repository:
 
 ```bash
-gitpeek
+gitforest
 ```
 
 ---
