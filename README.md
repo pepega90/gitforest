@@ -8,7 +8,8 @@ Built with Go + tview.
 
 ## Preview
 
-<img width="1553" height="916" alt="image" src="https://github.com/user-attachments/assets/9b3a8f7f-ea10-4734-846d-bdf214fb9fc3" />
+<img width="1189" height="468" alt="Screenshot 2026-05-16 at 09 58 53" src="https://github.com/user-attachments/assets/241b65c2-0068-43e2-8fb2-c4fb38e47fd4" />
+<img width="1186" height="467" alt="Screenshot 2026-05-16 at 09 58 29" src="https://github.com/user-attachments/assets/a73232b4-55de-4f6f-a132-698d1a52fc5a" />
 
 ---
 
