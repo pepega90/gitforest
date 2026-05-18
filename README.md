@@ -31,7 +31,7 @@ Built with Go + tview.
 ### Go Install
 
 ```bash
-go install github.com/pepega90/gitforest
+go install github.com/pepega90/gitforest@latest
 ```
 
 ### Clone & Build
