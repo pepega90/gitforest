@@ -60,7 +60,6 @@ func searchCommits(keyword string) []string {
 	output := executeCommand(
 		"git",
 		"log",
-		"--all",
 		"--pretty=format:%H|%s",
 		"--grep="+keyword,
 		fmt.Sprintf("-%d", MaxCommitLoad),
